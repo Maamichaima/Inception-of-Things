@@ -5,6 +5,11 @@ export KUBECONFIG=/etc/rancher/k3s/k3s.yaml
 
 kubectl apply -f /vagrant/confs/
 
+until curl -s -H 'Host: app1.com' http://192.168.56.110 > /dev/null; do
+  echo "Waiting for ingress..."
+  sleep 2
+done
+
 echo "All apps deployed. Test with:"
 echo "  curl -H 'Host: app1.com' http://192.168.56.110"
 echo "  curl -H 'Host: app2.com' http://192.168.56.110"

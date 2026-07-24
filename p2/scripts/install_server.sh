@@ -15,6 +15,7 @@ until kubectl get nodes >/dev/null 2>&1; do
     sleep 2
 done
 
+
 echo "K3s is ready!"
 
 # Allow the vagrant user to use kubectl
