@@ -1,0 +1,54 @@
+installCertmanager: false
+
+certmanager-issuer:
+  email: admin@example.com
+
+global:
+  hosts:
+    domain: local
+    https: false
+  edition: ce
+  ingress:
+    configureCertmanager: false
+    class: nginx
+    tls:
+      enabled: false
+
+nginx-ingress:
+  enabled: false
+
+gitlab-runner:
+  install: false
+
+prometheus:
+  install: false
+
+grafana:
+  enabled: false
+
+gitlab:
+  gitaly:
+    resources: { requests: { cpu: 100m, memory: 256Mi } }
+  webservice:
+    resources: { requests: { cpu: 300m, memory: 800Mi } }
+    minReplicas: 1
+    maxReplicas: 1
+  sidekiq:
+    resources: { requests: { cpu: 100m, memory: 500Mi } }
+    minReplicas: 1
+    maxReplicas: 1
+  toolbox:
+    resources: { requests: { cpu: 50m, memory: 200Mi } }
+
+registry:
+  enabled: true
+  resources: { requests: { cpu: 50m, memory: 100Mi } }
+
+postgresql:
+  resources: { requests: { cpu: 100m, memory: 256Mi } }
+
+redis:
+  resources: { requests: { cpu: 50m, memory: 100Mi } }
+
+minio:
+  resources: { requests: { cpu: 50m, memory: 100Mi } } 
