@@ -1,0 +1,21 @@
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: playground-gitlab
+  namespace: argocd
+spec:
+  project: default
+  source:
+    # Local GitLab, reached through its in-cluster service (namespace gitlab)
+    repoURL: 'http://gitlab-webservice-default.gitlab.svc:8181/root/cmaami-iot.git'
+    targetRevision: HEAD
+    path: manifests
+  destination:
+    server: 'https://kubernetes.default.svc'
+    namespace: dev
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true

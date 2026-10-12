@@ -1,60 +1,64 @@
+#!/bin/bash
+
+# Exit immediately if a command exits with a non-zero status
 set -e
 
-CLUSTER_NAME="iot-cluster"
-DOMAIN="local.gitlab"
-PORT="8888"
+# Creates the K3d cluster and installs GitLab in the 'gitlab' namespace
 
-echo "=== Stage 0: Install environment requirements (Docker, kubectl, k3d, Helm) ==="
-command -v docker >/dev/null 2>&1 || curl -fsSL https://get.docker.com | sh
-sudo usermod -aG docker "$USER" || true
+CLUSTER_NAME="iot-bonus"
+CHART_VERSION="9.11.8"   # GitLab CE v18.11
+GITLAB_HOST="gitlab.local"
+CONFS_DIR="$(cd "$(dirname "$0")/../confs" && pwd)"
 
-command -v kubectl >/dev/null 2>&1 || {
-  curl -LO "https://dl.k8s.io/release/$(curl -L -s https://dl.k8s.io/release/stable.txt)/bin/linux/amd64/kubectl"
-  sudo install -o root -g root -m 0755 kubectl /usr/local/bin/kubectl
-  rm -f kubectl
-}
+if ! docker info >/dev/null 2>&1; then
+  echo "❌ Docker is not usable by $USER. Run 'newgrp docker' (or log out/in) and retry."
+  exit 1
+fi
 
-command -v k3d >/dev/null 2>&1 || curl -s https://raw.githubusercontent.com/k3d-io/k3d/main/install.sh | bash
+# wil42/playground is only built for amd64: on an arm64 machine, register
+# QEMU emulation so the K3d nodes can still run it
+if [ "$(uname -m)" = "aarch64" ] || [ "$(uname -m)" = "arm64" ]; then
+  echo "=== arm64 host detected: enabling amd64 emulation ==="
+  docker run --privileged --rm tonistiigi/binfmt --install amd64
+fi
 
-command -v helm >/dev/null 2>&1 || curl https://raw.githubusercontent.com/helm/helm/main/scripts/get-helm-4 | bash
-
-command -v git >/dev/null 2>&1 || sudo apt-get update && sudo apt-get install -y git
-
-echo "Installed versions:"
-docker --version
-kubectl version --client
-k3d version
-helm version
-git --version
-
-
-# ================================================= installation ====================================================
-
-echo "===  K3d cluster creation ==="
-k3d cluster create ${CLUSTER_NAME} \
-  --agents 1 \
-  --servers 1 \
-  --port "${PORT}:80@loadbalancer" \
+echo "=== K3d cluster creation ==="
+# Port 80 of this machine -> K3d load balancer -> Traefik -> GitLab ingress
+if k3d cluster get "${CLUSTER_NAME}" >/dev/null 2>&1; then
+  echo "Cluster already exists, skipping."
+else
+  k3d cluster create "${CLUSTER_NAME}" \
+    --servers 1 \
+    --port "80:80@loadbalancer" \
+    --wait
+fi
+kubectl config use-context "k3d-${CLUSTER_NAME}"
 
 echo "=== Namespace ==="
-kubectl create namespace gitlab
+kubectl create namespace gitlab --dry-run=client -o yaml | kubectl apply -f -
 
-helm repo add gitlab https://charts.gitlab.io/
+echo "=== Install GitLab (chart ${CHART_VERSION}) ==="
+helm repo add gitlab https://charts.gitlab.io/ --force-update
 helm repo update
+helm upgrade --install gitlab gitlab/gitlab \
+  --version "${CHART_VERSION}" \
+  --namespace gitlab \
+  --timeout 900s \
+  -f "${CONFS_DIR}/gitlab_values.yaml"
 
-echo "=== install GitLab ==="
-helm install gitlab gitlab/gitlab \
---version 9.11.8 \
---namespace gitlab --create-namespace \
---timeout 600s \
--f "$(dirname "$0")/../confs/gitlab_values.yaml"
+echo "=== Wait for GitLab to be ready (this can take 10-15 minutes) ==="
+kubectl wait --for=condition=available deployment --all -n gitlab --timeout=1800s
 
-# echo "=== install GitLab ingress ==="
-# kubectl apply -f "$(dirname "$0")/../confs/gitlab_ingress.yaml"
+# Make gitlab.local resolve to this machine
+if ! grep -q " ${GITLAB_HOST}" /etc/hosts; then
+  echo "127.0.0.1 ${GITLAB_HOST}" | sudo tee -a /etc/hosts > /dev/null
+fi
 
-echo "=== Wait for GitLab pods to be ready ==="
-kubectl wait --for=condition=Ready pods --all -n gitlab --timeout=600s
+until curl -sf "http://${GITLAB_HOST}/users/sign_in" > /dev/null; do
+  echo "Waiting for http://${GITLAB_HOST} ..."
+  sleep 10
+done
 
-echo "=====GitLab root password:====="
-kubectl get secret gitlab-gitlab-initial-root-password -n gitlab -o jsonpath='{.data.password}' | base64 -d
-echo
+echo "=== GitLab is up: http://${GITLAB_HOST} ==="
+echo "user     : root"
+echo "password : $(kubectl get secret gitlab-gitlab-initial-root-password -n gitlab -o jsonpath='{.data.password}' | base64 -d)"

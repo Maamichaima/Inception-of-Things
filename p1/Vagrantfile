@@ -1,6 +1,6 @@
 LOGIN = "cmaami"
 
-IMAGE_NAME = "bento/debian-12"
+IMAGE_NAME = "bento/debian-13"
 
 SERVER_IP = "192.168.56.110"
 WORKER_IP = "192.168.56.111"

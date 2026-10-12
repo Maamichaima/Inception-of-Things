@@ -1,19 +1,22 @@
+# GitLab Helm chart 9.11.8 (GitLab CE v18.11.6), trimmed down to run inside a local K3d cluster.
+# Web UI: http://gitlab.local (K3d load balancer port 80 -> Traefik -> GitLab ingress)
+
 installCertmanager: false
 
-certmanager-issuer:
-  email: admin@example.com
-
 global:
-  hosts:
-    domain: local
-    https: false
   edition: ce
+  hosts:
+    domain: local          # GitLab is served on gitlab.local
+    https: false
   ingress:
+    class: traefik         # K3d ships Traefik as its Ingress controller
     configureCertmanager: false
-    class: nginx
     tls:
       enabled: false
+  kas:
+    enabled: false         # GitLab agent for Kubernetes is not needed (Argo CD does the deploys)
 
+# Components we do not need for this lab
 nginx-ingress:
   enabled: false
 
@@ -23,7 +26,7 @@ gitlab-runner:
 prometheus:
   install: false
 
-grafana:
+registry:
   enabled: false
 
 gitlab:
@@ -39,10 +42,11 @@ gitlab:
     maxReplicas: 1
   toolbox:
     resources: { requests: { cpu: 50m, memory: 200Mi } }
-
-registry:
-  enabled: true
-  resources: { requests: { cpu: 50m, memory: 100Mi } }
+  gitlab-shell:
+    minReplicas: 1
+    maxReplicas: 1
+  gitlab-exporter:
+    enabled: false
 
 postgresql:
   resources: { requests: { cpu: 100m, memory: 256Mi } }
@@ -51,4 +55,4 @@ redis:
   resources: { requests: { cpu: 50m, memory: 100Mi } }
 
 minio:
-  resources: { requests: { cpu: 50m, memory: 100Mi } } 
+  resources: { requests: { cpu: 50m, memory: 100Mi } }
