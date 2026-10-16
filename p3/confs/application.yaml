@@ -6,9 +6,9 @@ metadata:
 spec:
   project: default
   source:
-    repoURL: 'https://github.com/Maamichaima/test_argocd.git'
+    repoURL: 'https://github.com/bchokri/bchokri-playground.git'
     targetRevision: HEAD
-    path: p3
+    path: .
   destination:
     server: 'https://kubernetes.default.svc'
     namespace: dev

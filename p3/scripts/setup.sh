@@ -1,83 +1,93 @@
 #!/bin/bash
 
-# Exit immediately if a command exits with a non-zero status
+# Exit immediately if any command returns a non-zero exit code
 set -e
 
-# Run after install.sh (and 'newgrp docker'):
-# creates the K3d cluster, the argocd/dev namespaces, installs Argo CD
-# and lets it deploy the application from the GitHub repository.
+# Resolve paths dynamically regardless of where the script is executed
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+P3_DIR="$(cd "${SCRIPT_DIR}/.." && pwd)"
+APP_CONF="${P3_DIR}/confs/application.yaml"
 
-CLUSTER_NAME="iot-p3"
-CONFS_DIR="$(cd "$(dirname "$0")/../confs" && pwd)"
-ARGOCD_MANIFEST="https://raw.githubusercontent.com/argoproj/argo-cd/stable/manifests/install.yaml"
+CLUSTER_NAME="iot-cluster"
 
 echo "=========================================="
-echo "🚀 Starting Part 3 Setup Script..."
+echo "🧹 1. Cleaning up existing cluster resources..."
 echo "=========================================="
+if k3d cluster list | grep -q "${CLUSTER_NAME}"; then
+  echo "Deleting existing cluster: ${CLUSTER_NAME}..."
+  k3d cluster delete "${CLUSTER_NAME}"
+fi
 
-if ! docker info >/dev/null 2>&1; then
-  echo "❌ Docker is not usable by $USER. Run 'newgrp docker' (or log out/in) and retry."
+echo "=========================================="
+echo "🚀 2. Creating K3d Cluster: ${CLUSTER_NAME}..."
+echo "=========================================="
+# Maps host port 8888 -> K3d LoadBalancer port 80 (Traefik Ingress)
+k3d cluster create "${CLUSTER_NAME}" \
+  --api-port 6443 \
+  -p "8888:80@loadbalancer" \
+  --wait
+
+echo "=========================================="
+echo "🗂️  3. Creating Namespaces ('argocd' & 'dev')..."
+echo "=========================================="
+kubectl create namespace argocd
+kubectl create namespace dev
+
+echo "=========================================="
+echo "🤖 4. Deploying Argo CD Engine..."
+echo "=========================================="
+kubectl apply -n argocd --server-side --force-conflicts -f https://raw.githubusercontent.com/argoproj/argo-cd/stable/manifests/install.yaml
+
+echo "=========================================="
+echo "⏳ 5. Waiting for Argo CD components to be ready..."
+echo "=========================================="
+# Brief sleep ensures Kubernetes API registers all Deployment objects before waiting
+sleep 5
+kubectl wait --for=condition=available deployment \
+  -l app.kubernetes.io/name=argocd-server \
+  -n argocd \
+  --timeout=300s
+
+kubectl wait --for=condition=available deployment \
+  -l app.kubernetes.io/name=argocd-repo-server \
+  -n argocd \
+  --timeout=300s
+
+echo "=========================================="
+echo "📄 6. Applying Argo CD Application manifest..."
+echo "=========================================="
+if [ ! -f "${APP_CONF}" ]; then
+  echo "❌ Error: Manifest not found at ${APP_CONF}"
   exit 1
 fi
-
-# wil42/playground is only built for amd64: on an arm64 machine, register
-# QEMU emulation so the K3d nodes can still run it
-if [ "$(uname -m)" = "aarch64" ] || [ "$(uname -m)" = "arm64" ]; then
-  echo "🧩 arm64 host detected: enabling amd64 emulation..."
-  docker run --privileged --rm tonistiigi/binfmt --install amd64
-fi
-
-# 1. Create the K3d cluster (K3s running inside Docker containers)
-echo "📦 Creating K3d cluster '${CLUSTER_NAME}'..."
-if k3d cluster get "${CLUSTER_NAME}" >/dev/null 2>&1; then
-  echo "Cluster already exists, skipping."
-else
-  k3d cluster create "${CLUSTER_NAME}" --wait
-fi
-kubectl config use-context "k3d-${CLUSTER_NAME}"
-
-# 2. Create the two namespaces
-echo "🗂️  Creating namespaces argocd and dev..."
-kubectl create namespace argocd --dry-run=client -o yaml | kubectl apply -f -
-kubectl create namespace dev --dry-run=client -o yaml | kubectl apply -f -
-
-# 3. Install Argo CD (server-side apply: its CRDs are too big for a client-side apply)
-echo "🤖 Installing Argo CD..."
-kubectl apply -n argocd --server-side --force-conflicts -f "${ARGOCD_MANIFEST}"
-
-echo "⏳ Waiting for Argo CD to be ready..."
-kubectl wait --for=condition=available deployment --all -n argocd --timeout=600s
-kubectl rollout status statefulset/argocd-application-controller -n argocd --timeout=600s
-
-# 4. Tell Argo CD which GitHub repository to watch
-echo "🔗 Creating the Argo CD application..."
-kubectl apply -f "${CONFS_DIR}/application.yaml"
-
-echo "⏳ Waiting for Argo CD to deploy the app in 'dev'..."
-until kubectl get deployment playground -n dev >/dev/null 2>&1; do
-  sleep 5
-done
-kubectl rollout status deployment/playground -n dev --timeout=600s
-
-# 5. Expose Argo CD UI (8080) and the app (8888) on this machine.
-# The loop restarts the port-forward when the pod is replaced (v1 -> v2 update).
-echo "🔌 Starting port-forwards..."
-pkill -f "kubectl port-forward" >/dev/null 2>&1 || true
-nohup bash -c 'while true; do kubectl port-forward svc/argocd-server -n argocd 8080:443 --address 0.0.0.0; sleep 2; done' >/tmp/pf-argocd.log 2>&1 &
-nohup bash -c 'while true; do kubectl port-forward svc/playground-service -n dev 8888:8888 --address 0.0.0.0; sleep 2; done' >/tmp/pf-app.log 2>&1 &
-sleep 3
-
-ARGOCD_PASSWORD=$(kubectl -n argocd get secret argocd-initial-admin-secret -o jsonpath='{.data.password}' | base64 -d)
+kubectl apply -f "${APP_CONF}"
 
 echo "=========================================="
-echo "✅ Setup Complete!"
+echo "⏳ 7. Waiting for app deployment in 'dev'..."
+echo "=========================================="
+echo "Giving Argo CD up to 60s to pull from GitHub and spin up the pod..."
+for i in {1..30}; do
+  if kubectl get pods -n dev 2>/dev/null | grep -q "Running"; then
+    echo "✅ Dev pod is up and running!"
+    break
+  fi
+  sleep 2
+done
+
+echo "=========================================="
+echo "🔑 Argo CD Initial Admin Password:"
+echo "=========================================="
+ARGOCD_PASS=$(kubectl -n argocd get secret argocd-initial-admin-secret -o jsonpath="{.data.password}" | base64 -d)
+echo "Password: ${ARGOCD_PASS}"
+
+echo "=========================================="
+echo "✅ Setup Complete & Ready for Defense!"
+echo "=========================================="
 echo ""
-echo "Argo CD UI : https://localhost:8080"
-echo "  user     : admin"
-echo "  password : ${ARGOCD_PASSWORD}"
-echo ""
-echo "App        : curl http://localhost:8888/"
-echo ""
-echo "Check      : kubectl get ns"
-echo "             kubectl get pods -n dev"
+echo "📌 Verification Commands for Evaluation:"
+echo "1. Namespaces:     kubectl get ns"
+echo "2. Dev Pods:       kubectl get pods -n dev"
+echo "3. App Curl Test:  curl http://localhost:8888/ (or tunnel: kubectl port-forward svc/wil-playground-service 9999:80 -n dev)"
+echo "4. Argo CD UI:     kubectl port-forward svc/argocd-server -n argocd 8080:443"
+echo "                   URL: https://localhost:8080 | User: admin | Pass: ${ARGOCD_PASS}"
 echo "=========================================="
