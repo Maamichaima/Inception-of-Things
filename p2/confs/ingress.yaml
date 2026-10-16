@@ -26,7 +26,6 @@ spec:
             port:
               number: 80
 
-  # Catch-all
   - http:
       paths:
       - path: /

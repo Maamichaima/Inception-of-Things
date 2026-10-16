@@ -18,12 +18,10 @@ done
 
 echo "K3s is ready!"
 
-# Allow the vagrant user to use kubectl
 mkdir -p /home/vagrant/.kube
 cp /etc/rancher/k3s/k3s.yaml /home/vagrant/.kube/config
 chown -R vagrant:vagrant /home/vagrant/.kube
 
-# Replace localhost with the VM IP
 sed -i "s/127.0.0.1/192.168.56.110/g" /home/vagrant/.kube/config
 
 echo "Installation complete!"

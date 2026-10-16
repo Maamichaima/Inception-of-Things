@@ -8,7 +8,6 @@ Vagrant.configure("2") do |config|
   config.vm.box = IMAGE_NAME
   config.vm.boot_timeout = 600
 
-  # Server (control-plane)
   config.vm.define "#{LOGIN}S" do |server|
     server.vm.hostname = "#{LOGIN}S"
     server.vm.network "private_network" , ip: SERVER_IP

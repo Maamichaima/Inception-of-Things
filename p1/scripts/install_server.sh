@@ -5,16 +5,7 @@ apt-get install -y curl
 
 echo "Updating packages..."
 
-# sudo -i
-
-# -s Silent mode.
-# -f if website returns an error (404, 500...), stop.
-# -L Follow redirects.
-
-# INSTALL_K3S_EXEC tells the installer: "Install K3s as a server with these options."
-# 644 belongs only to root.
-
-curl -sfL https://get.k3s.io | sudo INSTALL_K3S_EXEC="server --node-ip=192.168.56.110 --write-kubeconfig-mode=644" sh - # Execute the script received from curl.
+curl -sfL https://get.k3s.io | sudo INSTALL_K3S_EXEC="server --node-ip=192.168.56.110 --write-kubeconfig-mode=644" sh - 
 
 echo "Checking K3s..."
 
